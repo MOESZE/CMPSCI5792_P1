@@ -1,3 +1,7 @@
+# TCP File Transfer Project
+# Mohammed ALHasani
+# Student ID: MAKFW
+
 CXX=g++
 CXXOPTIMIZE= -O2
 CXXFLAGS= -g -Wall -pthread -std=c++11 $(CXXOPTIMIZE)
