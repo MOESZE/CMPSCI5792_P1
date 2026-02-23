@@ -117,6 +117,8 @@ int main(int argc, char* argv[]) {
 
         char buffer[BUFFER_SIZE];
         bool timeout_occured = false;
+        ssize_t total_bytes = 0;
+        ssize_t last_recv = -1;
 
         while (true) {
             ssize_t bytes =
@@ -125,30 +127,61 @@ int main(int argc, char* argv[]) {
                      BUFFER_SIZE,
                      0);
 
+            last_recv = bytes;
+
             if (bytes > 0) {
-                write(file_fd, buffer, bytes);
+                ssize_t w = write(file_fd, buffer, bytes);
+                if (w > 0)
+                    total_bytes += w;
             }
             else if (bytes == 0) {
-                break; // client closed normally
+                // client closed normally
+                break;
             }
             else {
-                if (errno == EWOULDBLOCK ||
-                    errno == EAGAIN) {
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
                     timeout_occured = true;
+                } else {
+                    std::cerr << "ERROR: recv failed (" << errno << ")\n";
                 }
                 break;
             }
         }
 
-        close(clientSockfd);
+        // If we received any bytes, treat it as success even if a receive timeout occured
+        bool success = (total_bytes > 0) || (last_recv == 0 && !timeout_occured);
 
-        if (timeout_occured) {
+        if (success) {
+            // Ensure data is flushed to disk before acknowledging
+            fsync(file_fd);
+
+            // Print console acknowledgement with client info and byte count
+            char client_ip[INET_ADDRSTRLEN] = {0};
+            inet_ntop(AF_INET, &clientAddr.sin_addr, client_ip, sizeof(client_ip));
+            int client_port = ntohs(clientAddr.sin_port);
+            std::cout << "Received " << total_bytes
+                      << " bytes from " << client_ip << ":" << client_port
+                      << " -> " << filename << std::endl;
+
+            std::string ack = "RECEIVED\n";
+            send(clientSockfd, ack.c_str(), ack.size(), 0);
+        } else {
+            std::string nack = "ERROR\n";
+            send(clientSockfd, nack.c_str(), nack.size(), 0);
+
+            // Overwrite file with ERROR marker
             close(file_fd);
             file_fd = open(filename.c_str(),
-                           O_WRONLY | O_TRUNC);
-            write(file_fd, "ERROR", 5);
+                           O_WRONLY | O_TRUNC | O_CREAT,
+                           0644);
+            if (file_fd >= 0) {
+                write(file_fd, "ERROR", 5);
+            } else {
+                std::cerr << "ERROR: cannot write ERROR marker to file\n";
+            }
         }
 
+        close(clientSockfd);
         close(file_fd);
     }
 

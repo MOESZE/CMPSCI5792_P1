@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <fstream>
+#include <string>
 
 #define BUFFER_SIZE 8192
 #define TIMEOUT_SEC 10
@@ -103,6 +104,37 @@ int main(int argc, char* argv[]) {
             close(sockfd);
             return 1;
         }
+    }
+
+    // Signal EOF to server (we're done sending)
+    shutdown(sockfd, SHUT_WR);
+
+    // Set receive timeout so recv won't block indefinitely
+    timeout.tv_sec = TIMEOUT_SEC;
+    timeout.tv_usec = 0;
+    setsockopt(sockfd,
+               SOL_SOCKET,
+               SO_RCVTIMEO,
+               &timeout,
+               sizeof(timeout));
+
+    // Read acknowledgement from server
+    std::string ack;
+    ssize_t r;
+    while ((r = recv(sockfd, buffer, BUFFER_SIZE, 0)) > 0) {
+        ack.append(buffer, buffer + r);
+        if (ack.find('\n') != std::string::npos)
+            break;
+    }
+
+    if (r < 0) {
+        if (errno == EWOULDBLOCK || errno == EAGAIN) {
+            std::cerr << "ERROR: receive timeout\n";
+        } else {
+            std::cerr << "ERROR: recv failed\n";
+        }
+    } else if (!ack.empty()) {
+        std::cout << ack;
     }
 
     close(sockfd);
